@@ -3,7 +3,7 @@
 import ApiResponse from "../resources/IApiResponse";
 import { http } from "../utils/http";
 import endpoint from "../constants/endpoint";
-import {  IUploadAdminDocument } from "../components/types";
+import {  IUploadAdminDocument, IUploadAdminDocumentRequest, IDocumentData } from "../components/types";
 
 
 
@@ -35,8 +35,42 @@ export const getPreSignedUrl = (data: {
 
   //   return { data: { success: true } }; // Example
   // };
-  export const uploadAdminDocuments = (
-    data: IUploadAdminDocument,
-  ): Promise<ApiResponse> => {
-    return http.post(`${endpoint.docSathi.UPLOAD_DOCUMENTS}`, data);
+// Helper function to transform data to backend format
+const transformToBackendFormat = (data: IUploadAdminDocument): IUploadAdminDocumentRequest => {
+  return {
+    FileData: data.FileData || null,
+    WebsiteUrl: data.WebsiteUrl || null,
+    YoutubeUrl: data.YoutubeUrl || null,
+    type: data.type || null,
+    documentFormat: data.documentFormat || null
   };
+};
+
+export const uploadAdminDocuments = (
+  data: IUploadAdminDocument,
+): Promise<ApiResponse> => {
+  const backendData = transformToBackendFormat(data);
+  return http.post(`${endpoint.docSathi.UPLOAD_DOCUMENTS}`, backendData);
+};
+
+// Helper functions for different upload types
+export const uploadDocument = (fileData: IDocumentData, documentFormat: string): Promise<ApiResponse> => {
+  return uploadAdminDocuments({
+    FileData: fileData,
+    documentFormat: documentFormat
+  });
+};
+
+export const uploadWebsiteUrl = (websiteUrl: string, type?: string): Promise<ApiResponse> => {
+  return uploadAdminDocuments({
+    WebsiteUrl: websiteUrl,
+    type: type
+  });
+};
+
+export const uploadYoutubeUrl = (youtubeUrl: string, type?: string): Promise<ApiResponse> => {
+  return uploadAdminDocuments({
+    YoutubeUrl: youtubeUrl,
+    type: type
+  });
+};

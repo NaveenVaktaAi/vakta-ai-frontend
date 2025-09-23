@@ -5,7 +5,9 @@
 import {
   getUploadedDocuments,
   checkStatusOfTrainingDocument,
-  uploadAdminDocuments,
+  uploadDocument,
+  uploadWebsiteUrl,
+  uploadYoutubeUrl,
 } from '../services/api';
 import { IDocumentData, FormErrors, DeleteDocDetail } from './types';
 import ApiResponse from '../resources/IApiResponse';
@@ -22,8 +24,11 @@ import helperInstance from './helper';
 
 const DocumentUploadForm: React.FC = () => {
   // State management
+  const [uploadType, setUploadType] = useState<'document' | 'website' | 'youtube'>('document');
   const [textFile, setTextFile] = useState<File[]>([]);
   const [documentFormat, setDocumentFormat] = useState<string>('');
+  const [websiteUrl, setWebsiteUrl] = useState<string>('');
+  const [youtubeUrl, setYoutubeUrl] = useState<string>('');
   const [loader, setLoader] = useState<boolean>(false);
   const [isTrainingInProgress, setIsTrainingInProgress] = useState<boolean>(false);
   const [openAlertModel, setOpenAlertModel] = useState<boolean>(false);
@@ -35,6 +40,8 @@ const DocumentUploadForm: React.FC = () => {
   const [error, setError] = useState<FormErrors>({
     imageSizeError: '',
     documentFormatError: '',
+    websiteUrlError: '',
+    youtubeUrlError: '',
   });
 
   // Fetch data function (implement based on your needs)
@@ -43,13 +50,9 @@ const DocumentUploadForm: React.FC = () => {
     console.log('Fetching data...', refresh);
   };
 
-  // Send documents to API
-  const sendDocuments = async (FileData: IDocumentData[]): Promise<ApiResponse> => {
-    const res = await uploadAdminDocuments({
-      FileData: FileData,
-      documentFormat: documentFormat,
-      
-    });
+  // Send single document to API
+  const sendDocument = async (FileData: IDocumentData): Promise<ApiResponse> => {
+    const res = await uploadDocument(FileData, documentFormat);
     if (res?.data?.success) {
       setIsTrainingInProgress(true);
       fetchData(true);
@@ -58,12 +61,73 @@ const DocumentUploadForm: React.FC = () => {
     return res;
   };
 
+  // Send website URL to API
+  const sendWebsiteUrl = async (): Promise<ApiResponse> => {
+    const res = await uploadWebsiteUrl(websiteUrl, 'website');
+    if (res?.data?.success) {
+      setIsTrainingInProgress(true);
+      fetchData(true);
+      setWebsiteUrl('');
+    }
+    return res;
+  };
+
+  // Send YouTube URL to API
+  const sendYoutubeUrl = async (): Promise<ApiResponse> => {
+    const res = await uploadYoutubeUrl(youtubeUrl, 'youtube');
+    if (res?.data?.success) {
+      setIsTrainingInProgress(true);
+      fetchData(true);
+      setYoutubeUrl('');
+    }
+    return res;
+  };
+
+  // Validate URL format
+  const isValidUrl = (url: string): boolean => {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Validate YouTube URL
+  const isValidYouTubeUrl = (url: string): boolean => {
+    const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/)|youtu\.be\/)[\w-]+/;
+    return youtubeRegex.test(url);
+  };
+
+  // Clear form errors
+  const clearErrors = () => {
+    setError({
+      imageSizeError: '',
+      documentFormatError: '',
+      websiteUrlError: '',
+      youtubeUrlError: '',
+    });
+  };
+
+  // Handle upload type change
+  const handleUploadTypeChange = (type: 'document' | 'website' | 'youtube') => {
+    setUploadType(type);
+    clearErrors();
+    // Clear form data when switching types
+    setTextFile([]);
+    setDocumentFormat('');
+    setWebsiteUrl('');
+    setYoutubeUrl('');
+  };
+
   // Handle file selection
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const { files } = event.target;
     const newErrors: FormErrors = {
       imageSizeError: '',
       documentFormatError: '',
+      websiteUrlError: '',
+      youtubeUrlError: '',
     };
 
     if (files) {
@@ -101,21 +165,23 @@ const DocumentUploadForm: React.FC = () => {
     setError(newErrors);
   };
 
-  // Upload documents
-  const uploadDocuments = async () => {
-    const newErrors: FormErrors = {
-      imageSizeError: '',
-      documentFormatError: '',
-    };
+  // Main upload function that handles all types
+  const uploadContent = async () => {
+    // Clear any existing errors
+    clearErrors();
 
-    // Validation
-    if (documentFormat === '') {
-      newErrors.documentFormatError = 'Select the document format';
-    }
-
-    if (textFile.length === 0) {
-      newErrors.imageSizeError = 'Select a file to upload';
-    } else {
+    // Validate based on upload type
+    if (uploadType === 'document') {
+      if (!documentFormat) {
+        setError((prev) => ({ ...prev, documentFormatError: 'Please select a document format' }));
+        return;
+      }
+      if (textFile.length === 0) {
+        setError((prev) => ({ ...prev, imageSizeError: 'Please select at least one file' }));
+        return;
+      }
+      
+      // File validation for documents
       const fileErrors: string[] = [];
       textFile.forEach((file) => {
         if (file.size > MAX_FILE_SIZE_MB) {
@@ -128,61 +194,101 @@ const DocumentUploadForm: React.FC = () => {
       });
 
       if (fileErrors.length > 0) {
-        newErrors.imageSizeError = fileErrors.join(' ');
-      } else {
-        newErrors.imageSizeError = '';
+        setError((prev) => ({ ...prev, imageSizeError: fileErrors.join(' ') }));
+        return;
+      }
+    } else if (uploadType === 'website') {
+      if (!websiteUrl.trim()) {
+        setError((prev) => ({ ...prev, websiteUrlError: 'Please enter a website URL' }));
+        return;
+      }
+      if (!isValidUrl(websiteUrl)) {
+        setError((prev) => ({ ...prev, websiteUrlError: 'Please enter a valid URL' }));
+        return;
+      }
+    } else if (uploadType === 'youtube') {
+      if (!youtubeUrl.trim()) {
+        setError((prev) => ({ ...prev, youtubeUrlError: 'Please enter a YouTube URL' }));
+        return;
+      }
+      if (!isValidYouTubeUrl(youtubeUrl)) {
+        setError((prev) => ({ ...prev, youtubeUrlError: 'Please enter a valid YouTube URL' }));
+        return;
       }
     }
 
-    setError(newErrors);
+    setLoader(true);
 
-    // Check if there are any errors
-    if (newErrors.imageSizeError || newErrors.documentFormatError) {
-      return;
-    }
-
-    // Proceed with upload
-    if (textFile.length > 0 && documentFormat) {
-      setLoader(true);
-      let successCount = 0;
-      const failedFiles = new Set<string>();
-
-      // Process each valid file
-      for (const file of textFile) {
-        try {
-          const response = await helperInstance.uploadFileOnS3(file);
-          if (Array.isArray(response) && response.length > 0) {
-          
-            const res = await sendDocuments(response);
-            if (res?.data?.success) {
-              successCount++;
-              setTextFile((prevFiles) => prevFiles.filter((f) => f !== file));
-            } else {
-              failedFiles.add(file.name);
-            }
-          } else {
-            failedFiles.add(file.name);
-          }
-        } catch (error) {
-          console.error('Upload error:', error);
-          failedFiles.add(file.name);
+    try {
+      if (uploadType === 'document') {
+        await uploadDocuments();
+      } else if (uploadType === 'website') {
+        const res = await sendWebsiteUrl();
+        if (res?.data?.success) {
+          toastMessageSuccess('Website URL added successfully!');
+        } else {
+          toastMessageError('Failed to add website URL');
+        }
+      } else if (uploadType === 'youtube') {
+        const res = await sendYoutubeUrl();
+        if (res?.data?.success) {
+          toastMessageSuccess('YouTube URL added successfully!');
+        } else {
+          toastMessageError('Failed to add YouTube URL');
         }
       }
-
-      // Show results
-      if (successCount > 0) {
-        toastMessageSuccess(
-          "Document uploaded successfully"
-        );
-      }
-
-      if (failedFiles.size > 0) {
-        toastMessageError(
-          `${[...failedFiles].join(', ')} Failed to upload`
-        );
-      }
-
+    } catch (error) {
+      console.error('Upload error:', error);
+      toastMessageError('An error occurred during upload');
+    } finally {
       setLoader(false);
+    }
+  };
+
+  // Upload documents function (for document type only)
+  const uploadDocuments = async () => {
+    let successCount = 0;
+    const failedFiles = new Set<string>();
+
+    // Process each valid file
+    for (const file of textFile) {
+      try {
+        const response = await helperInstance.uploadFileOnS3(file);
+        if (Array.isArray(response) && response.length > 0) {
+          // Since backend expects single document, send each document individually
+          for (const documentData of response) {
+            const res = await sendDocument(documentData);
+            if (res?.data?.success) {
+              successCount++;
+            } else {
+              failedFiles.add(file.name);
+              break; // If one document fails, don't send others from the same file
+            }
+          }
+          // Remove file from state only if all documents were sent successfully
+          if (!failedFiles.has(file.name)) {
+            setTextFile((prevFiles) => prevFiles.filter((f) => f !== file));
+          }
+        } else {
+          failedFiles.add(file.name);
+        }
+      } catch (error) {
+        console.error('Upload error:', error);
+        failedFiles.add(file.name);
+      }
+    }
+
+    // Show results
+    if (successCount > 0) {
+      toastMessageSuccess(
+        `${successCount} document${successCount > 1 ? 's' : ''} uploaded successfully!`
+      );
+    }
+
+    if (failedFiles.size > 0) {
+      toastMessageError(
+        `Failed to upload: ${Array.from(failedFiles).join(', ')}`
+      );
     }
   };
 
@@ -199,9 +305,54 @@ const DocumentUploadForm: React.FC = () => {
 
   return (
     <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-lg">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Upload Documents</h2>
+      <h2 className="text-2xl font-bold text-gray-800 mb-6">Upload Content</h2>
 
-      {/* Document Format Selection */}
+      {/* Upload Type Selection */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-3">
+          Select Upload Type *
+        </label>
+        <div className="flex space-x-4">
+          <label className="flex items-center">
+            <input
+              type="radio"
+              name="uploadType"
+              value="document"
+              checked={uploadType === 'document'}
+              onChange={() => handleUploadTypeChange('document')}
+              className="mr-2"
+            />
+            <span className="text-sm">📄 Document</span>
+          </label>
+          <label className="flex items-center">
+            <input
+              type="radio"
+              name="uploadType"
+              value="website"
+              checked={uploadType === 'website'}
+              onChange={() => handleUploadTypeChange('website')}
+              className="mr-2"
+            />
+            <span className="text-sm">🌐 Website URL</span>
+          </label>
+          <label className="flex items-center">
+            <input
+              type="radio"
+              name="uploadType"
+              value="youtube"
+              checked={uploadType === 'youtube'}
+              onChange={() => handleUploadTypeChange('youtube')}
+              className="mr-2"
+            />
+            <span className="text-sm">📺 YouTube URL</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Document Upload Section */}
+      {uploadType === 'document' && (
+        <>
+          {/* Document Format Selection */}
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Document Format *
@@ -267,11 +418,57 @@ const DocumentUploadForm: React.FC = () => {
           </div>
         </div>
       )}
+        </>
+      )}
+
+      {/* Website URL Section */}
+      {uploadType === 'website' && (
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Website URL *
+          </label>
+          <input
+            type="url"
+            value={websiteUrl}
+            onChange={(e) => setWebsiteUrl(e.target.value)}
+            placeholder="https://example.com"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {error.websiteUrlError && (
+            <p className="text-red-500 text-sm mt-1">{error.websiteUrlError}</p>
+          )}
+          <p className="text-xs text-gray-500 mt-1">
+            Enter a valid website URL to extract content from
+          </p>
+        </div>
+      )}
+
+      {/* YouTube URL Section */}
+      {uploadType === 'youtube' && (
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            YouTube URL *
+          </label>
+          <input
+            type="url"
+            value={youtubeUrl}
+            onChange={(e) => setYoutubeUrl(e.target.value)}
+            placeholder="https://youtube.com/watch?v=..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {error.youtubeUrlError && (
+            <p className="text-red-500 text-sm mt-1">{error.youtubeUrlError}</p>
+          )}
+          <p className="text-xs text-gray-500 mt-1">
+            Enter a valid YouTube video URL to extract transcript
+          </p>
+        </div>
+      )}
 
       {/* Upload Button */}
       <div className="flex justify-end">
         <button
-          onClick={uploadDocuments}
+          onClick={uploadContent}
           disabled={loader || isTrainingInProgress}
           className={`px-6 py-2 rounded-md text-white font-medium ${
             loader || isTrainingInProgress
@@ -279,7 +476,11 @@ const DocumentUploadForm: React.FC = () => {
               : 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500'
           }`}
         >
-          {loader ? 'Uploading...' : 'Upload Documents'}
+          {loader ? 'Uploading...' : 
+            uploadType === 'document' ? 'Upload Documents' :
+            uploadType === 'website' ? 'Add Website URL' :
+            'Add YouTube URL'
+          }
         </button>
       </div>
 

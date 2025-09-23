@@ -13,11 +13,20 @@ export interface IYoutubeUrl {
 }
 
 export interface IUploadAdminDocument {
-  FileData: IDocumentData[];
-  WebsiteUrls?: IWebsiteUrl[];
-  YoutubeUrls?: IYoutubeUrl[];
+  FileData?: IDocumentData;
+  WebsiteUrl?: string;
+  YoutubeUrl?: string;
   type?: string;
   documentFormat?: string;
+}
+
+// Backend request format interface - matches your Pydantic model
+export interface IUploadAdminDocumentRequest {
+  FileData?: IDocumentData | null;
+  WebsiteUrl?: string | null;
+  YoutubeUrl?: string | null;
+  type?: string | null;
+  documentFormat?: string | null;
 }
 
   
@@ -34,6 +43,8 @@ export interface IUploadAdminDocument {
   export interface FormErrors {
     imageSizeError: string;
     documentFormatError: string;
+    websiteUrlError: string;
+    youtubeUrlError: string;
   }
   
   export interface DeleteDocDetail {
