@@ -13,14 +13,9 @@ import MessageBubble from "./message-bubble"
 import ChatControls from "./chat-controls"
 import { useChatWebSocket } from "../hooks/use-chat-websocket"
 
-interface ChatInterfaceProps {
-  documentId?: string | null
-}
-
-export default function ChatInterface({ documentId }: ChatInterfaceProps) {
+export default function ChatInterface() {
   const [inputValue, setInputValue] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const hasAttemptedConnect = useRef<string | null>(null)
 
   const {
     isConnected,
@@ -35,7 +30,7 @@ export default function ChatInterface({ documentId }: ChatInterfaceProps) {
     isMockMode,
     currentChatId,
     createNewChat,
-  } = useChatWebSocket(1, documentId) // Pass documentId to the hook
+  } = useChatWebSocket(1) // Using user ID 1 for demo
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -44,15 +39,6 @@ export default function ChatInterface({ documentId }: ChatInterfaceProps) {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
-
-  // Auto-connect when documentId is provided
-  useEffect(() => {
-    if (documentId && !isConnected && !isMockMode && connectionStatus !== "connecting" && hasAttemptedConnect.current !== documentId) {
-      console.log("[ChatInterface] Auto-connecting for document:", documentId)
-      hasAttemptedConnect.current = documentId
-      connect()
-    }
-  }, [documentId, isConnected, isMockMode, connectionStatus, connect])
 
   const handleSendMessage = () => {
     if (!inputValue.trim()) return
@@ -111,32 +97,24 @@ export default function ChatInterface({ documentId }: ChatInterfaceProps) {
             <div className="p-2 bg-primary rounded-full">
               <BotIcon className="w-6 h-6 text-primary-foreground" />
             </div>
-              <div>
-                <h1 className="text-xl font-bold text-foreground">
-                  {documentId ? "Document Chat" : "AI Chatbot with RAG"}
-                </h1>
-                <div className="flex items-center gap-2">
-                  {getConnectionIcon()}
-                  <p className="text-sm text-muted-foreground">{getConnectionText()}</p>
-                  {currentChatId && (
-                    <Badge variant="secondary" className="text-xs">
-                      Chat: {currentChatId.slice(-8)}
-                    </Badge>
-                  )}
-                  {documentId && (
-                    <Badge variant="default" className="text-xs">
-                      <FileTextIcon className="w-3 h-3 mr-1" />
-                      Document: {documentId.slice(-8)}
-                    </Badge>
-                  )}
-                  {!isMockMode && (
-                    <Badge variant="outline" className="text-xs">
-                      <FileTextIcon className="w-3 h-3 mr-1" />
-                      RAG Enabled
-                    </Badge>
-                  )}
-                </div>
+            <div>
+              <h1 className="text-xl font-bold text-foreground">AI Chatbot with RAG</h1>
+              <div className="flex items-center gap-2">
+                {getConnectionIcon()}
+                <p className="text-sm text-muted-foreground">{getConnectionText()}</p>
+                {currentChatId && (
+                  <Badge variant="secondary" className="text-xs">
+                    Chat: {currentChatId.slice(-8)}
+                  </Badge>
+                )}
+                {!isMockMode && (
+                  <Badge variant="outline" className="text-xs">
+                    <FileTextIcon className="w-3 h-3 mr-1" />
+                    RAG Enabled
+                  </Badge>
+                )}
               </div>
+            </div>
           </div>
           <div className="flex gap-2">
             <ChatControls
@@ -148,12 +126,12 @@ export default function ChatInterface({ documentId }: ChatInterfaceProps) {
             <Button onClick={createNewChat} variant="outline" size="sm">
               New Chat
             </Button>
-            {!documentId && !isConnected && !isMockMode && connectionStatus !== "connecting" && (
+            {!isConnected && !isMockMode && connectionStatus !== "connecting" && (
               <Button onClick={connect} variant="outline" size="sm">
                 Connect
               </Button>
             )}
-            {!documentId && isConnected && !isMockMode && (
+            {isConnected && !isMockMode && (
               <Button onClick={disconnect} variant="outline" size="sm">
                 Disconnect
               </Button>
@@ -231,20 +209,18 @@ export default function ChatInterface({ documentId }: ChatInterfaceProps) {
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder={
-              documentId
-                ? "Ask me about this document..."
-                : isMockMode
-                  ? "Ask me about your documents (demo mode)..."
-                  : isConnected
-                    ? "Ask me about your documents..."
-                    : "Connect to start chatting..."
+              isMockMode
+                ? "Ask me about your documents (demo mode)..."
+                : isConnected
+                  ? "Ask me about your documents..."
+                  : "Connect to start chatting..."
             }
-            disabled={!isConnected && !isMockMode && !documentId}
+            disabled={!isConnected && !isMockMode}
             className="flex-1 bg-input border-border text-foreground placeholder:text-muted-foreground"
           />
           <Button
             onClick={handleSendMessage}
-            disabled={!inputValue.trim() || (!isConnected && !isMockMode && !documentId)}
+            disabled={!inputValue.trim()}
             className="bg-primary hover:bg-primary/90 text-primary-foreground"
           >
             <SendIcon className="w-4 h-4" />

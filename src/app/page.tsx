@@ -1,12 +1,9 @@
-import ChatInterface from "./components/chat-interface";
-
+import DocSathiMain from "./components/doc-sathi-main";
 
 export default function Home() {
   return (
     <main className="min-h-screen bg-background">
-      <div className="pt-4">
-        <ChatInterface />
-      </div>
+      <DocSathiMain />
     </main>
   )
 }

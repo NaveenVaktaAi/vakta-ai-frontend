@@ -8,9 +8,9 @@ import {  IUploadAdminDocument, IUploadAdminDocumentRequest, IDocumentData } fro
 
 
 // This is a placeholder for your API functions. Implement as needed.
-export const getUploadedDocuments = async (): Promise<ApiResponse> => {
-  return http.get(`${endpoint.docSathi.GET_UPLOADED_DOCUMENTS.replace(':user_id', '1')}`);
-};
+export const getUploadedDocuments = async () => {
+    // Implementation
+  };
   
   export const checkStatusOfTrainingDocument = async () => {
     // Implementation

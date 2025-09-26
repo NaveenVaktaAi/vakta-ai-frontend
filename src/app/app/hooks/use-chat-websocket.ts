@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
+import { chatService, ChatMessage } from "../services/chatService"
 
 interface MessageMetadata {
   source_documents?: string[]
@@ -24,7 +25,7 @@ interface Message {
   metadata?: MessageMetadata
 }
 
-interface UseWebSocketReturn {
+interface UseChatWebSocketReturn {
   isConnected: boolean
   sendMessage: (message: string) => void
   messages: Message[]
@@ -35,9 +36,11 @@ interface UseWebSocketReturn {
   exportMessages: () => void
   connectionStatus: "connecting" | "connected" | "disconnected" | "error"
   isMockMode: boolean
+  currentChatId: string | null
+  createNewChat: () => Promise<void>
 }
 
-export function useWebSocket(): UseWebSocketReturn {
+export function useChatWebSocket(userId: number = 1): UseChatWebSocketReturn {
   const [isConnected, setIsConnected] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -53,9 +56,9 @@ export function useWebSocket(): UseWebSocketReturn {
     "disconnected",
   )
   const [isMockMode, setIsMockMode] = useState(false)
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
-  const clientIdRef = useRef<string>(Math.random().toString(36).substring(7))
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const reconnectAttemptsRef = useRef(0)
   const maxReconnectAttempts = 3
@@ -92,19 +95,40 @@ export function useWebSocket(): UseWebSocketReturn {
       return "Hello! I'm currently in demo mode. To enable full RAG capabilities with document search, please start the FastAPI backend server."
     }
     if (message.includes("help")) {
-      return "I'd be happy to help! Right now I'm running in mock mode. For real AI assistance with document knowledge, please start the backend server by running 'uvicorn main:app --reload' in the backend directory."
+      return "I'd be happy to help! Right now I'm running in mock mode. For real AI assistance with document knowledge, please start the backend server by running 'uvicorn app.main:app --reload' in the backend directory."
     }
     if (message.includes("document") || message.includes("upload")) {
       return "In full mode, I can search through your uploaded documents to provide accurate answers. Upload documents via the Documents tab and I'll use them to enhance my responses!"
     }
     if (message.includes("backend") || message.includes("server")) {
-      return "To start the backend server: 1) Navigate to the backend directory, 2) Install dependencies with 'pip install -r requirements.txt', 3) Set your OPENAI_API_KEY environment variable, 4) Run 'uvicorn main:app --reload'"
+      return "To start the backend server: 1) Navigate to the backend directory, 2) Install dependencies with 'pip install -r requirements.txt', 3) Set your OPENAI_API_KEY environment variable, 4) Run 'uvicorn app.main:app --reload'"
     }
 
     return mockAIResponses[Math.floor(Math.random() * mockAIResponses.length)]
   }, [])
 
-  const connect = useCallback(() => {
+  const createNewChat = useCallback(async () => {
+    try {
+      const response = await chatService.createChat({
+        user_id: userId,
+        title: `Chat ${new Date().toLocaleString()}`,
+        status: 'active'
+      })
+      console.log("[Chat] Create chat response---------------------:", response)
+      
+      if (response.success && response.data) {
+        setCurrentChatId(response.data.chat_id)
+        console.log('New chat created:', response.data.chat_id)
+        return response.data.chat_id
+      }
+    } catch (error) {
+      console.error('Failed to create new chat:', error)
+      setIsMockMode(true)
+    }
+    return null
+  }, [userId])
+
+  const connect = useCallback(async () => {
     if (isMockMode || !shouldReconnectRef.current) {
       return
     }
@@ -116,11 +140,24 @@ export function useWebSocket(): UseWebSocketReturn {
     setConnectionStatus("connecting")
 
     try {
-      const wsUrl = `ws://localhost:5000/api/v1/chat/ws/${clientIdRef.current}`
+      // Create a new chat if we don't have one
+      console.log("[Chat] Creating new chat---------------------:", currentChatId)
+      let chatId = currentChatId
+      console.log("[Chat] Chat ID---------------------:", chatId)
+      if (!chatId) {
+        chatId = await createNewChat()
+        console.log("[Chat] Chat ID---------in if------------:", chatId)
+        if (!chatId) {
+          throw new Error('Failed to create chat')
+        }
+      }
+
+      const wsUrl = `ws://localhost:5000/api/v1/chat/ws/${chatId}`
+      console.log("[Chat] WebSocket URL---------------------:", wsUrl)
       const ws = new WebSocket(wsUrl)
 
       ws.onopen = () => {
-        console.log("[v0] Connected to WebSocket")
+        console.log("[Chat] Connected to WebSocket for chat:", chatId)
         setIsConnected(true)
         setConnectionStatus("connected")
         setIsMockMode(false)
@@ -132,30 +169,92 @@ export function useWebSocket(): UseWebSocketReturn {
         try {
           const data = JSON.parse(event.data)
           setIsTyping(false)
+          console.log("[Chat] Message received----------1-----------:", data)
 
-          const newMessage: Message = {
-            id: Date.now().toString(),
-            content: data.content,
-            sender: "bot",
-            timestamp: data.timestamp,
-            metadata: data.metadata,
+          // Handle different message types from backend
+          if (data.mt === "chat_message_bot_partial") {
+            // Handle streaming message
+            if (data.start) {
+              // Message start - create new message
+              const newMessage: Message = {
+                id: data.start,
+                content: '',
+                sender: "bot",
+                timestamp: data.timestamp || new Date().toISOString(),
+                metadata: {
+                  message_context: data.message_context,
+                  streaming: true
+                }
+              }
+              setMessages(prev => [...prev, newMessage])
+            } else if (data.partial) {
+              // Partial content - update existing message
+              const existingMessageIndex = messages.findIndex(msg => msg.id === data.uuid)
+              if (existingMessageIndex >= 0) {
+                setMessages(prev => prev.map((msg, index) => 
+                  index === existingMessageIndex 
+                    ? { ...msg, content: msg.content + data.partial }
+                    : msg
+                ))
+              }
+            } else if (data.stop) {
+              // Message end - mark as complete
+              const existingMessageIndex = messages.findIndex(msg => msg.id === data.stop)
+              if (existingMessageIndex >= 0) {
+                setMessages(prev => prev.map((msg, index) => 
+                  index === existingMessageIndex 
+                    ? { ...msg, metadata: { ...msg.metadata, streaming: false } }
+                    : msg
+                ))
+              }
+            }
+          } else if (data.mt === "message_upload_confirm") {
+            // Handle complete message
+            const newMessage: Message = {
+              id: data.token || Date.now().toString(),
+              content: data.message,
+              sender: data.isBot ? "bot" : "user",
+              timestamp: data.timestamp || new Date().toISOString(),
+              metadata: {
+                message_context: data.message_context,
+                token: data.token
+              }
+            }
+            setMessages(prev => [...prev, newMessage])
+          } else if (data.mt === "new_message") {
+            // Handle complete message
+            const newMessage: Message = {
+              id: data.messageId || Date.now().toString(),
+              content: data.message,
+              sender: "bot",
+              timestamp: data.timestamp || new Date().toISOString(),
+            }
+            setMessages(prev => [...prev, newMessage])
+          } else {
+            // Handle legacy format or simple responses
+            const newMessage: Message = {
+              id: Date.now().toString(),
+              content: data.content || data.message || data.response || '',
+              sender: "bot",
+              timestamp: data.timestamp || new Date().toISOString(),
+              metadata: data.metadata,
+            }
+            setMessages(prev => [...prev, newMessage])
           }
-
-          setMessages((prev) => [...prev, newMessage])
         } catch (error) {
-          console.error("[v0] Error parsing message:", error)
+          console.error("[Chat] Error parsing message:", error)
           setIsTyping(false)
         }
       }
 
       ws.onclose = (event) => {
-        console.log("[v0] Disconnected from WebSocket", event.code)
+        console.log("[Chat] Disconnected from WebSocket", event.code)
         setIsConnected(false)
         setConnectionStatus("disconnected")
         wsRef.current = null
 
         if (reconnectAttemptsRef.current >= maxReconnectAttempts || !shouldReconnectRef.current) {
-          console.log("[v0] Switching to mock mode - backend server not available")
+          console.log("[Chat] Switching to mock mode - backend server not available")
           setIsMockMode(true)
           setConnectionStatus("disconnected")
           shouldReconnectRef.current = false
@@ -172,7 +271,7 @@ export function useWebSocket(): UseWebSocketReturn {
       }
 
       ws.onerror = (error) => {
-        console.log("[v0] WebSocket connection failed - switching to mock mode")
+        console.log("[Chat] WebSocket connection failed - switching to mock mode")
         setConnectionStatus("error")
         setIsConnected(false)
         setIsTyping(false)
@@ -182,12 +281,12 @@ export function useWebSocket(): UseWebSocketReturn {
 
       wsRef.current = ws
     } catch (error) {
-      console.error("[v0] Failed to create WebSocket connection:", error)
+      console.error("[Chat] Failed to create WebSocket connection:", error)
       setConnectionStatus("error")
       setIsMockMode(true)
       shouldReconnectRef.current = false
     }
-  }, [isMockMode])
+  }, [isMockMode, currentChatId, createNewChat, messages])
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -216,7 +315,7 @@ export function useWebSocket(): UseWebSocketReturn {
   }, [connect])
 
   const sendMessage = useCallback(
-    (content: string) => {
+    async (content: string) => {
       const userMessage: Message = {
         id: Date.now().toString(),
         content,
@@ -227,14 +326,33 @@ export function useWebSocket(): UseWebSocketReturn {
       setMessages((prev) => [...prev, userMessage])
       setIsTyping(true)
 
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && !isMockMode) {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && !isMockMode && currentChatId) {
+        // Send message via WebSocket
         wsRef.current.send(
           JSON.stringify({
-            content,
+            mt: "message_upload",
+            message: content,
+            content: content,
             timestamp: new Date().toISOString(),
+            userId: "1", // Default user ID
+            timezone: "UTC",
+            selectedLanguage: "en"
           }),
         )
+
+        // Also save to database
+        try {
+          await chatService.createMessage({
+            chat_id: currentChatId,
+            message: content,
+            is_bot: false,
+            type: 'text'
+          })
+        } catch (error) {
+          console.error('Failed to save user message:', error)
+        }
       } else {
+        // Mock mode
         setTimeout(
           () => {
             const mockResponse: Message = {
@@ -255,15 +373,18 @@ export function useWebSocket(): UseWebSocketReturn {
         )
       }
     },
-    [isMockMode, getMockResponse],
+    [isMockMode, currentChatId, getMockResponse],
   )
 
   const clearMessages = useCallback(async () => {
     try {
-      if (!isMockMode) {
-        await fetch(`http://127.0.0.1:5000/api/v1/reset/${clientIdRef.current}`, {
-          method: "POST",
-        })
+      if (!isMockMode && currentChatId) {
+        // Delete the current chat and create a new one
+        await chatService.deleteChat(currentChatId)
+        const newChatId = await createNewChat()
+        if (newChatId) {
+          setCurrentChatId(newChatId)
+        }
       }
 
       const initialMessage: Message = {
@@ -276,7 +397,7 @@ export function useWebSocket(): UseWebSocketReturn {
       setMessages([initialMessage])
       setIsTyping(false)
     } catch (error) {
-      console.log("[v0] Could not reset server conversation (expected if backend not running)")
+      console.log("[Chat] Could not reset server conversation (expected if backend not running)")
       const initialMessage: Message = {
         id: "1",
         content:
@@ -287,11 +408,12 @@ export function useWebSocket(): UseWebSocketReturn {
       setMessages([initialMessage])
       setIsTyping(false)
     }
-  }, [isMockMode])
+  }, [isMockMode, currentChatId, createNewChat])
 
   const exportMessages = useCallback(() => {
     const chatData = {
       exportDate: new Date().toISOString(),
+      chatId: currentChatId,
       messages: messages.filter((msg) => msg.id !== "1"),
     }
 
@@ -306,7 +428,7 @@ export function useWebSocket(): UseWebSocketReturn {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
-  }, [messages])
+  }, [messages, currentChatId])
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -333,5 +455,8 @@ export function useWebSocket(): UseWebSocketReturn {
     exportMessages,
     connectionStatus,
     isMockMode,
+    currentChatId,
+    createNewChat,
   }
 }
+
